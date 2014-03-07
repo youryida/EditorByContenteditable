@@ -5,24 +5,37 @@
 	<meta http-equiv="X-UA-Compatible" content="IE=9"> 
 	<meta charset="utf-8" />
 <style>
+*{padding:0;margin:0;}
 .editBtn{padding:5px;}
-#editBox{height:200px;width:400px;border:1px solid blue;}
+#editBox{height:200px;width:550px;border:1px solid blue;}
+#introBox{position:absolute;top:35px;left:580px;right:10px;min-height:100px;}
+
 </style>
 <script src="http://code.jquery.com/jquery-1.7.2.min.js"></script>
 <script type="text/javascript">
 var selectedRange;
 $(function() {
 	editBtnBind();
+	editBoxChgBind();
 	selectionSaveBind();
 });
 function editBtnBind(){
 	$(".editBtn").on('click',function (e){
 		if($(this).hasClass("bold")) bold();
 		if($(this).hasClass("insert")) insert();	
-		if($(this).hasClass("replace")) replace();			
+		if($(this).hasClass("fontSize")){
+			var val=$(this).attr("val");
+			fontSize(val);
+		}	
 	});
 }
-
+//右侧显示editBox的html
+function editBoxChgBind(){
+	$("#editBox").on('DOMSubtreeModified',function (e){
+		$("#introBox").text($(this).html());
+	})
+}
+/********************************************文本编辑********************************************/
 function bold(){
 	restoreSelection();
 	document.execCommand('bold');
@@ -37,29 +50,88 @@ function insert(){
 	window.getSelection().collapse(aa, aa.childNodes.length);//光标移到node最后
 	saveSelection();	
 }
-function replace(){
+function fontSize(val){
 	restoreSelection();
-	var fragment=selectedRange.extractContents();		
-	var aa=document.createElement("span");
-	aa.innerHTML="<i style='color:red;'>呵了个呵</i>";
-	selectedRange.insertNode(aa);
-	//window.getSelection().extend(aa,1); //ie9没有此方法
-	window.getSelection().selectAllChildren(aa);
-	saveSelection();	
+	var sizeText=val;	
+	var fragment=selectedRange.cloneContents();//获取range中html片段
+	var tempDiv = document.createElement("div");
+	tempDiv.appendChild(fragment);
+	var selHtml = tempDiv.innerHTML;
+	selHtml=selHtml.replace(/font-size:[\s\S]*?;/gi,"");	//清空原有font-size样式
+	selHtml=selHtml.replace(/[\s]?style="\s*?"/gi,"");//清空空style
+	tempDiv.innerHTML=selHtml;
+	var fragNodes=tempDiv.childNodes;
+	selectedRange.deleteContents();	
+	for(var x=fragNodes.length-1;x>=0;x--){//处理过后的html片段以nodelist的方式倒序逐个插入选区（之前版本全部html套入span,整个插入的方式不合适）
+		var one=fragNodes[x];
+		if(one.nodeType==3){//文本节点添加span标签
+			oSpan=document.createElement("span");
+			oSpan.innerHTML=one.nodeValue;
+			one=oSpan;
+		}
+		one.style.fontSize=sizeText;
+		selectedRange.insertNode(one);
+	}//以上可能会生成空标签、冗余嵌套标签
+	tempDiv=null;
+	var editBox=document.activeElement;
+	//clearEmptyTags(editBox);
+	//clearRepeatTags(editBox);
+	restoreSelection();//还原选区 这里不是很理解 现在的问题也是在这里 1.不能精确选中新选区 2.多行文字的编辑有bug
+	//saveSelection();
 }
 
-
-
-
+/*****************************************空标签 冗余标签筛选 【未使用】**************************************/
+//清除box中的空标签
+function clearEmptyTags(boxEle){
+	var childs=boxEle.children;
+	for(var x=0;x<childs.length;x++){
+		var one=childs[x];		
+		if(one.nodeType!=1) continue;
+		if(one.innerText==""){
+			boxEle.removeChild(one);
+			x--;
+		} 
+	}
+}
+//清除box中sytle相同的冗余父子嵌套
+function clearRepeatTags(boxEle){
+	var childs=boxEle.children;
+	for(var x=0;x<childs.length;x++){
+		var one=childs[x];
+		if(one.nodeType!=1) continue;
+		if(one.childElementCount==1 && childStyleIsContainParent(one)){
+			one.outerHTML=one.innerHTML;
+			x--;
+		} 
+	}
+}
+//只有一个子节点的父节点的样式是否在子节点中都存在
+function childStyleIsContainParent(parent){
+	var ps=parent.style;
+	if(ps.cssText.trim()=="") return true;
+	var child=parent.children[0];
+	var csStr=child.style.cssText;
+	for(var x=0;x<ps.length;x++){
+		if(csStr.indexOf(ps[x])<0) return false;
+	}
+	return true;
+}
+/*****************************************选区Range的保存与还原**************************************/
 function selectionSaveBind(){
 	$("div[contenteditable=true]").on('mouseleave',function () {
+	//console.log(window.getSelection())
 		if (this!=document.activeElement) return false;
 		saveSelection();
+		
 	})
 }
 function saveSelection(){
+	if(selectedRange){//选择文字相同时 阻止保存新range，因为在chrome会导致产生冗余标签
+		var text0=selectedRange.toString();
+		var text1=getCurrentRange().toString();
+		if (text0==text1) return false;	
+	} 
 	selectedRange = getCurrentRange();
-	console.log(selectedRange);
 }
 function  getCurrentRange() {
 	var sel = window.getSelection();
@@ -78,36 +150,17 @@ function restoreSelection() {
 <body>
 	<button class="editBtn bold">加粗</button>
 	<button class="editBtn insert">html插入</button>
-	<button class="editBtn replace">html替换</button>	
-
+	<button class="editBtn fontSize" val="40px">html替换 size:40px</button>	
+	<button class="editBtn fontSize" val="20px">html替换 size:20px</button>		
 <div id="editBox" contenteditable="true">
 	此处输入文字...
 </div>
-<div style="position:absolute;top:5px;left:420px;">
-<pre>
-插入和替换选区里的html，还有更好的实现方法么？	（使用标准Selection和Range操作，要兼容IE9）
-function insert(){
-	restoreSelection();
-	var aa=document.createElement("span");
-	aa.innerHTML="<i style='color:red;'>呵了个呵</i>";
-	selectedRange.insertNode(aa);//这个插入成功后 光标会显示在node的最前
-	window.getSelection().collapse(aa, aa.childNodes.length);//光标移到node最后
-	saveSelection();	
-}
-function replace(){
-	restoreSelection();
-	var fragment=selectedRange.extractContents();		
-	var aa=document.createElement("span");
-	aa.innerHTML="<i style='color:red;'>呵了个呵</i>";
-	selectedRange.insertNode(aa);
-	//window.getSelection().extend(aa,1); //ie9没有此方法
-	window.getSelection().selectAllChildren(aa);
-	saveSelection();	
-}
-具体实现，请查看源码。加q交流 1140215489
-</pre>
-</div>
 contenteditable="true" editor
+
+<div id="introBox">
+
+</div>
+
 
 </body>
 </html>
